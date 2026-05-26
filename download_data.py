@@ -29,45 +29,75 @@ FILE_IDS = {
     "cnv_profiles_149drugs.parquet":                         "1HR4agIxo0sccTKF1PSxrHBEv5D6I8e--",
 }
 
+# Minimum expected file sizes in bytes (to detect corrupted downloads)
+MIN_SIZES = {
+    "best_model_OmicFormer_149drugs_seed456.pth":            100_000_000,  # 100MB
+    "train_embeddings.npy":                                   50_000_000,  # 50MB
+    "h_mut_OmicFormer_149drugs_seed456.npy":                  10_000_000,
+    "h_cnv_OmicFormer_149drugs_seed456.npy":                  10_000_000,
+    "h_exp_OmicFormer_149drugs_seed456.npy":                  10_000_000,
+    "exp_profiles_149drugs.parquet":                          10_000_000,
+    "mut_profiles_149drugs.parquet":                          10_000_000,
+    "cnv_profiles_149drugs.parquet":                          10_000_000,
+}
+
 def download_file(file_id, output_path):
-    """Download a file from Google Drive handling large file confirmation."""
     session = requests.Session()
     url = "https://drive.google.com/uc"
     params = {"id": file_id, "export": "download"}
-    
     response = session.get(url, params=params, stream=True)
-    
-    # Handle virus scan warning for large files
+
+    # Handle large file virus scan warning
     token = None
     for key, value in response.cookies.items():
         if key.startswith("download_warning"):
             token = value
             break
-    
     if token:
         params["confirm"] = token
         response = session.get(url, params=params, stream=True)
-    
-    # Write file
+
+    # Also check response content for confirmation token (newer Drive behavior)
+    content_type = response.headers.get("Content-Type", "")
+    if "text/html" in content_type:
+        # Parse confirmation from HTML response
+        import re
+        text = response.text
+        match = re.search(r'confirm=([0-9A-Za-z_-]+)', text)
+        if match:
+            params["confirm"] = match.group(1)
+            response = session.get(url, params=params, stream=True)
+
     with open(output_path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=32768):
+        for chunk in response.iter_content(chunk_size=65536):
             if chunk:
                 f.write(chunk)
 
+def file_is_valid(filepath, filename):
+    if not os.path.exists(filepath):
+        return False
+    size = os.path.getsize(filepath)
+    min_size = MIN_SIZES.get(filename, 100)  # default 100 bytes minimum
+    return size >= min_size
+
 def download_all_files(base_dir):
-    missing = [f for f in FILE_IDS if not os.path.exists(os.path.join(base_dir, f))]
-    if not missing:
-        print("All files already present.")
+    to_download = [
+        f for f in FILE_IDS
+        if not file_is_valid(os.path.join(base_dir, f), f)
+    ]
+    if not to_download:
+        print("All files present and valid.")
         return
 
-    print(f"Downloading {len(missing)} missing files...")
-    for filename in missing:
+    print(f"Downloading {len(to_download)} files...")
+    for filename in to_download:
         file_id = FILE_IDS[filename]
         output = os.path.join(base_dir, filename)
         print(f"Downloading {filename}...")
         try:
             download_file(file_id, output)
-            print(f"Done: {filename}")
+            size = os.path.getsize(output)
+            print(f"Done: {filename} ({size:,} bytes)")
         except Exception as e:
             print(f"Failed: {filename} — {e}")
 
