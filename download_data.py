@@ -1,7 +1,6 @@
 import os
 import gdown
 
-# Google Drive folder ID
 FOLDER_ID = "1ExeBFG53Q9zVdn35snJZrWHwaUS8Q0Xp"
 
 REQUIRED_FILES = [
@@ -36,11 +35,11 @@ def download_all_files(base_dir):
         return
 
     print("Downloading files from Google Drive...")
+    url = f"https://drive.google.com/drive/folders/{FOLDER_ID}"
     gdown.download_folder(
-        id=FOLDER_ID,
+        url=url,
         output=base_dir,
         quiet=False,
-        use_cookies=False,
-        remaining_ok=True
+        use_cookies=False
     )
     print("Download complete.")
