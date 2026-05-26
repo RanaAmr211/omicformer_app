@@ -396,7 +396,7 @@ def load_all_data():
     data["h_cnv"]        = np.load(f"{BASE_DIR}/h_cnv_{RUN_NAME}.npy")
     data["h_exp"]        = np.load(f"{BASE_DIR}/h_exp_{RUN_NAME}.npy")
     # Load train embeddings from chunks
-    parts = [np.load(f"{BASE_DIR}/train_embeddings_part{i}.npy") for i in range(4)]
+    parts = [np.load(f"{BASE_DIR}/train_embeddings_part{i}.npy", allow_pickle=True) for i in range(4)]
     data["train_emb"] = np.concatenate(parts, axis=0)
     data["y_train"]      = np.load(f"{BASE_DIR}/y_train.npy", allow_pickle=True)
     data["drug_names_train"] = np.load(f"{BASE_DIR}/drug_names_train.npy", allow_pickle=True)
