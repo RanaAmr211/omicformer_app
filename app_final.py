@@ -14,6 +14,11 @@ from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import r2_score, mean_squared_error
 import sys
 import warnings
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ── Auto-download data if needed ──────────────────────
+from download_data import download_all_files
+download_all_files(BASE_DIR)
 warnings.filterwarnings("ignore")
 
 # ── Page config ────────────────────────────────────────
