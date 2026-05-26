@@ -1,5 +1,5 @@
 import os
-import gdown
+import requests
 
 FILE_IDS = {
     "best_model_OmicFormer_149drugs_seed456.pth":            "1HRygM8y4q3JFGvwtyEGfqoMYhExIdezu",
@@ -29,6 +29,31 @@ FILE_IDS = {
     "cnv_profiles_149drugs.parquet":                         "1HR4agIxo0sccTKF1PSxrHBEv5D6I8e--",
 }
 
+def download_file(file_id, output_path):
+    """Download a file from Google Drive handling large file confirmation."""
+    session = requests.Session()
+    url = "https://drive.google.com/uc"
+    params = {"id": file_id, "export": "download"}
+    
+    response = session.get(url, params=params, stream=True)
+    
+    # Handle virus scan warning for large files
+    token = None
+    for key, value in response.cookies.items():
+        if key.startswith("download_warning"):
+            token = value
+            break
+    
+    if token:
+        params["confirm"] = token
+        response = session.get(url, params=params, stream=True)
+    
+    # Write file
+    with open(output_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=32768):
+            if chunk:
+                f.write(chunk)
+
 def download_all_files(base_dir):
     missing = [f for f in FILE_IDS if not os.path.exists(os.path.join(base_dir, f))]
     if not missing:
@@ -40,7 +65,10 @@ def download_all_files(base_dir):
         file_id = FILE_IDS[filename]
         output = os.path.join(base_dir, filename)
         print(f"Downloading {filename}...")
-        url = f"https://drive.google.com/uc?id={file_id}"
-        gdown.download(url, output, quiet=False, fuzzy=True)
+        try:
+            download_file(file_id, output)
+            print(f"Done: {filename}")
+        except Exception as e:
+            print(f"Failed: {filename} — {e}")
 
     print("All downloads complete.")
