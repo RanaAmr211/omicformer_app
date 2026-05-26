@@ -1,4 +1,5 @@
 import os
+import shutil
 from huggingface_hub import hf_hub_download
 
 REPO_ID = "rana234/omicformer-data"
@@ -42,16 +43,17 @@ def download_all_files(base_dir):
 
     print(f"Downloading {len(missing)} files from Hugging Face...")
     for filename in missing:
+        dest = os.path.join(base_dir, filename)
         print(f"Downloading {filename}...")
         try:
-            path = hf_hub_download(
+            # Download to HF cache then copy to base_dir
+            cached = hf_hub_download(
                 repo_id=REPO_ID,
                 filename=filename,
                 repo_type="dataset",
-                local_dir=base_dir,
-                local_dir_use_symlinks=False
             )
-            print(f"Done: {filename}")
+            shutil.copy2(cached, dest)
+            print(f"Done: {filename} ({os.path.getsize(dest):,} bytes)")
         except Exception as e:
             print(f"Failed: {filename} — {e}")
 
