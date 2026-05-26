@@ -1,5 +1,6 @@
 import os
 import requests
+import re
 
 FILE_IDS = {
     "best_model_OmicFormer_149drugs_seed456.pth":            "1HRygM8y4q3JFGvwtyEGfqoMYhExIdezu",
@@ -10,7 +11,10 @@ FILE_IDS = {
     "h_mut_OmicFormer_149drugs_seed456.npy":                 "1NkZ3nIU9nDoL9I00vqMpkuO2NDgem-Zl",
     "h_cnv_OmicFormer_149drugs_seed456.npy":                 "1MjIJOgpy2_Suo8Lkyf5NdY3YrlJBdUdy",
     "h_exp_OmicFormer_149drugs_seed456.npy":                 "19qh4Vnpr3zziPDaj4RifEmZgFdd5BTP1",
-    "train_embeddings.npy":                                  "1BFf6kvWlzq2Qs5h5OtUj7I9loir0UPG2",
+    "train_embeddings_part0.npy":                            "18Lsl1apqZQhYVlZh0P4L5iD28mtBplLC",
+    "train_embeddings_part1.npy":                            "1MXr4_sJu1pLlFaBhLknxqwcNBkX22IO3",
+    "train_embeddings_part2.npy":                            "1uT0v5yCGoup54JnxSy9hB5BfBWaKPwhI",
+    "train_embeddings_part3.npy":                            "1IzJxWSGVXbLmmo-nEWSlomrYPJ8s5jUE",
     "y_train.npy":                                           "1cghRFCyQmuJfg4bjZ2GeCFVllMSfk1Vm",
     "drug_names_train.npy":                                  "12uRxpPfVuI-Hn3sQiVuZecOuG_xGYfak",
     "drug_names_test.npy":                                   "1IHoyXUcayJyjOZDrhoBMWtsMT649pnvO",
@@ -29,16 +33,15 @@ FILE_IDS = {
     "cnv_profiles_149drugs.parquet":                         "1HR4agIxo0sccTKF1PSxrHBEv5D6I8e--",
 }
 
-# Minimum expected file sizes in bytes (to detect corrupted downloads)
 MIN_SIZES = {
-    "best_model_OmicFormer_149drugs_seed456.pth":            100_000_000,  # 100MB
-    "train_embeddings.npy":                                   50_000_000,  # 50MB
-    "h_mut_OmicFormer_149drugs_seed456.npy":                  10_000_000,
-    "h_cnv_OmicFormer_149drugs_seed456.npy":                  10_000_000,
-    "h_exp_OmicFormer_149drugs_seed456.npy":                  10_000_000,
-    "exp_profiles_149drugs.parquet":                          10_000_000,
-    "mut_profiles_149drugs.parquet":                          10_000_000,
-    "cnv_profiles_149drugs.parquet":                          10_000_000,
+    "best_model_OmicFormer_149drugs_seed456.pth": 100_000_000,
+    "train_embeddings_part0.npy":                  50_000_000,
+    "train_embeddings_part1.npy":                  50_000_000,
+    "train_embeddings_part2.npy":                  50_000_000,
+    "train_embeddings_part3.npy":                  50_000_000,
+    "exp_profiles_149drugs.parquet":               10_000_000,
+    "mut_profiles_149drugs.parquet":               10_000_000,
+    "cnv_profiles_149drugs.parquet":               10_000_000,
 }
 
 def download_file(file_id, output_path):
@@ -47,7 +50,6 @@ def download_file(file_id, output_path):
     params = {"id": file_id, "export": "download"}
     response = session.get(url, params=params, stream=True)
 
-    # Handle large file virus scan warning
     token = None
     for key, value in response.cookies.items():
         if key.startswith("download_warning"):
@@ -57,13 +59,9 @@ def download_file(file_id, output_path):
         params["confirm"] = token
         response = session.get(url, params=params, stream=True)
 
-    # Also check response content for confirmation token (newer Drive behavior)
     content_type = response.headers.get("Content-Type", "")
     if "text/html" in content_type:
-        # Parse confirmation from HTML response
-        import re
-        text = response.text
-        match = re.search(r'confirm=([0-9A-Za-z_-]+)', text)
+        match = re.search(r'confirm=([0-9A-Za-z_-]+)', response.text)
         if match:
             params["confirm"] = match.group(1)
             response = session.get(url, params=params, stream=True)
@@ -77,28 +75,22 @@ def file_is_valid(filepath, filename):
     if not os.path.exists(filepath):
         return False
     size = os.path.getsize(filepath)
-    min_size = MIN_SIZES.get(filename, 100)  # default 100 bytes minimum
-    return size >= min_size
+    return size >= MIN_SIZES.get(filename, 100)
 
 def download_all_files(base_dir):
-    to_download = [
-        f for f in FILE_IDS
-        if not file_is_valid(os.path.join(base_dir, f), f)
-    ]
+    to_download = [f for f in FILE_IDS if not file_is_valid(os.path.join(base_dir, f), f)]
     if not to_download:
         print("All files present and valid.")
         return
 
     print(f"Downloading {len(to_download)} files...")
     for filename in to_download:
-        file_id = FILE_IDS[filename]
         output = os.path.join(base_dir, filename)
         print(f"Downloading {filename}...")
         try:
-            download_file(file_id, output)
+            download_file(FILE_IDS[filename], output)
             size = os.path.getsize(output)
             print(f"Done: {filename} ({size:,} bytes)")
         except Exception as e:
             print(f"Failed: {filename} — {e}")
-
     print("All downloads complete.")
