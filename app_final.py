@@ -48,11 +48,11 @@ section.main > div { overflow: visible !important; }
 </style>
 """, unsafe_allow_html=True)
 
-GROQ_API_KEY = st.secrets["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"]
+
 
 # ── Constants ──────────────────────────────────────────
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
-GROQ_API_KEY = st.secrets["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"]
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 RUN_NAME       = "OmicFormer_149drugs_seed456"
 COLORS = {
     "primary":    "#0A2342",
