@@ -52,7 +52,7 @@ section.main > div { overflow: visible !important; }
 
 # ── Constants ──────────────────────────────────────────
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
-GROQ_API_KEY   = "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"
+GROQ_API_KEY   = "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"
 RUN_NAME       = "OmicFormer_149drugs_seed456"
 COLORS = {
     "primary":    "#0A2342",
