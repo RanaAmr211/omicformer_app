@@ -411,7 +411,7 @@ def load_all_data():
         lookup_index[key] = rec["idx"]
     data["lookup_index"] = lookup_index
 
-    # Build cell line → available drugs mapping
+    # Build cell line -> available drugs mapping
     cell_drug_map = {}
     for rec in data["lookup"]:
         cl = rec["cell_line"]
@@ -480,8 +480,6 @@ def load_model(dims):
 
 # ── Helper functions ───────────────────────────────────
 def sensitivity_label(pred_ic50, drug, data):
-    # Use training set IC50 values for this drug as threshold
-    # This matches what similar cases use, ensuring consistency
     train_mask = data["drug_names_train"] == drug
     if train_mask.sum() == 0:
         return "UNKNOWN", "badge badge-ms"
@@ -521,7 +519,6 @@ def get_similar_cases(idx, drug, data, k=5):
     sims      = cosine_similarity(query, drug_emb)[0]
     top_k     = sims.argsort()[-k:][::-1]
     results   = []
-    # Use median of training IC50 for this drug as threshold
     drug_median = np.median(drug_y)
     for i in top_k:
         results.append({
@@ -801,7 +798,6 @@ def ranking_scatter(records):
     preds  = [r["pred_ic50"] for r in records]
     labels = [r["sensitivity"] for r in records]
 
-    # Color by rank position: top = green, bottom = red, middle = amber
     n = len(records)
     bar_colors = []
     for i in range(n):
@@ -823,7 +819,6 @@ def ranking_scatter(records):
         textfont=dict(size=10, family="Space Grotesk", color=COLORS["text"]),
         hovertemplate="<b>%{y}</b><br>Predicted LN_IC50: %{x:.3f}<extra></extra>"))
 
-    # Add legend annotations
     fig.add_annotation(x=0.02, y=1.05, xref="paper", yref="paper",
         text="Green = Most Sensitive    Amber = Moderate    Red = Most Resistant",
         showarrow=False, font=dict(size=10, color=COLORS["muted"]),
@@ -844,7 +839,6 @@ def ranking_scatter(records):
 
 # ── Sidebar ────────────────────────────────────────────
 with st.sidebar:
-    # Logo image
     logo_path = os.path.join(BASE_DIR, "logo.png")
     if os.path.exists(logo_path):
         st.image(logo_path, use_container_width=True)
@@ -876,7 +870,6 @@ with st.sidebar:
 
     st.markdown("<div class='div'></div>", unsafe_allow_html=True)
 
-    # Navigation
     page = st.radio(
         "Navigation",
         ["Home", "Single Drug Analysis", "Drug Ranking", "Model Performance"],
@@ -884,7 +877,6 @@ with st.sidebar:
 
     st.markdown("<div class='div'></div>", unsafe_allow_html=True)
 
-    # Model stats
     st.markdown("<div style='font-size:0.7rem;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.1em;text-transform:uppercase;padding:0 0.25rem;margin-bottom:0.4rem'>Model Statistics</div>", unsafe_allow_html=True)
     for label, val in [
         ("Model", "OmicFormer"),
@@ -930,14 +922,13 @@ if page == "Home":
     </div>
     """, unsafe_allow_html=True)
 
-    # Stats row
     c1, c2, c3, c4, c5 = st.columns(5)
     for col, val, label, delta in [
         (c1, "0.9467", "Pearson r",   "Mean ± 0.0012"),
         (c2, "0.8956", "R² Score",    "Mean ± 0.0024"),
         (c3, "149",    "Drugs",       "GDSC2 dataset"),
         (c4, "937",    "Cell Lines",  "19,459 pairs"),
-        (c5, "+0.45%", "Beats PASO",  "PCC improvement"),
+        (c5, "+0.0042", "Beats PASO", "PCC improvement"),
     ]:
         with col:
             st.markdown(f"""
@@ -981,9 +972,10 @@ if page == "Home":
             <div class="card-hdr">Results vs State-of-the-Art</div>
         """, unsafe_allow_html=True)
         results_data = {
-            "Model":   ["SVM", "RF", "XGBoost", "LightGBM", "PASO (2025)", "OmicFormer"],
-            "PCC":     ["0.8735", "0.9048", "0.9288", "0.9305", "0.9425", "0.9467"],
-            "Status":  ["Baseline","Ours ✓","Ours ✓","Ours ✓","SOTA","Ours ✓"],
+            "Model":   ["MOLI [34]", "DeepCDR [32]", "DeepCCDS [43]", "DRPreter [37]",
+                        "PathDSP [42]", "PASO [11]", "OmicFormer (Ours)"],
+            "PCC":     ["0.813", "0.923", "0.930", "0.929",
+                        "0.9282 ± 0.0015", "0.9425 ± 0.0011", "0.9467 ± 0.0013"],
         }
         df_res = pd.DataFrame(results_data)
         st.dataframe(
@@ -991,8 +983,8 @@ if page == "Home":
             hide_index=True,
             use_container_width=True,
             column_config={
-                "PCC": st.column_config.TextColumn("PCC ± Std"),
-                "Status": st.column_config.TextColumn(""),
+                "Model": st.column_config.TextColumn("Model"),
+                "PCC": st.column_config.TextColumn("PCC"),
             })
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1069,7 +1061,6 @@ elif page == "Single Drug Analysis":
             pw_names   = [D["pathway_names"][i] if i < len(D["pathway_names"]) else f"Pathway {i}"
                           for i in top10_pw]
 
-            # ── Row 1: Prediction + Omic + Pathway ────
             r1c1, r1c2, r1c3 = st.columns([1, 1, 1.2])
 
             with r1c1:
@@ -1109,7 +1100,6 @@ elif page == "Single Drug Analysis":
                                 config={"displayModeBar": False})
                 st.markdown('</div>', unsafe_allow_html=True)
 
-            # ── Row 2: Gene Attribution ────────────────
             st.markdown('<div class="card"><div class="card-hdr">Layer 3 — Gene Attribution (Gradient × Input)</div>', unsafe_allow_html=True)
 
             try:
@@ -1152,7 +1142,6 @@ elif page == "Single Drug Analysis":
 
             st.markdown('</div>', unsafe_allow_html=True)
 
-            # ── Row 3: Narrative + Similar Cases ──────
             nc1, nc2 = st.columns([1.3, 1])
 
             with nc1:
@@ -1229,18 +1218,15 @@ elif page == "Drug Ranking":
             ranking_records.sort(key=lambda x: x["pred_ic50"], reverse=not ascending)
             ranking_records = ranking_records[:top_n]
 
-            # Bar chart overview
             st.markdown('<div class="card"><div class="card-hdr">Sensitivity Profile Overview</div>', unsafe_allow_html=True)
             st.plotly_chart(ranking_scatter(ranking_records), use_container_width=True,
                             config={"displayModeBar": False})
             st.markdown('</div>', unsafe_allow_html=True)
 
-            # Ranked list
             st.markdown('<div class="card"><div class="card-hdr">Ranked Drug List — Click to Expand</div>', unsafe_allow_html=True)
 
             for rank, rec in enumerate(ranking_records):
                 sens_color = sensitivity_color(rec["sensitivity"])
-                label_short = rec["sensitivity"].replace(" SENSITIVITY","").replace(" RESISTANCE","")
 
                 with st.expander(
                     f"#{rank+1}  {rec['drug']}  —  IC50: {rec['pred_ic50']:.3f}  |  {rec['sensitivity']}",
@@ -1286,6 +1272,33 @@ elif page == "Drug Ranking":
                     st.markdown(f'<div class="narrative" style="margin-top:0.75rem">{narrative}</div>', unsafe_allow_html=True)
                     st.markdown('<div style="font-size:0.7rem;color:#9CA3AF;margin-top:0.3rem">Not a clinical recommendation.</div>', unsafe_allow_html=True)
 
+                    # Layer 3 — Gene Attribution (on demand)
+                    st.markdown("<div style='margin-top:0.75rem'></div>", unsafe_allow_html=True)
+                    if st.button(f"🧬 Compute Gene Attribution (Layer 3)", key=f"l3_{rank}"):
+                        try:
+                            model, device = load_model(D["dims"])
+                            gl1, gl2, gl3 = st.columns(3)
+                            with gl1:
+                                st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Mutation Genes</div>', unsafe_allow_html=True)
+                                with st.spinner("Computing..."):
+                                    mg, ms = get_top_genes(rec["idx"], "mut", D, model, device)
+                                if mg:
+                                    st.plotly_chart(gene_bar_chart(mg, ms, COLORS["accent"]), use_container_width=True, config={"displayModeBar": False})
+                            with gl2:
+                                st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">CNV Genes</div>', unsafe_allow_html=True)
+                                with st.spinner("Computing..."):
+                                    cg, cs = get_top_genes(rec["idx"], "cnv", D, model, device)
+                                if cg:
+                                    st.plotly_chart(gene_bar_chart(cg, cs, "#6366F1"), use_container_width=True, config={"displayModeBar": False})
+                            with gl3:
+                                st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Expression Genes</div>', unsafe_allow_html=True)
+                                with st.spinner("Computing..."):
+                                    eg, es = get_top_genes(rec["idx"], "exp", D, model, device)
+                                if eg:
+                                    st.plotly_chart(gene_bar_chart(eg, es, "#F59E0B"), use_container_width=True, config={"displayModeBar": False})
+                        except Exception as e:
+                            st.markdown(f'<div class="warn">Gene attribution error: {str(e)[:80]}</div>', unsafe_allow_html=True)
+
             st.markdown('</div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════
@@ -1296,23 +1309,33 @@ elif page == "Model Performance":
     st.markdown('<div class="pg-sub">Comprehensive evaluation of OmicFormer across 3 seeds, comparison with baselines, and analysis of predictions.</div>', unsafe_allow_html=True)
 
     # Results comparison table
-    st.markdown('<div class="card"><div class="card-hdr">Full Results — All Models vs PASO (PLOS Computational Biology 2025)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="card"><div class="card-hdr">OmicFormer vs Published Multi-Omic Drug Response Models</div>', unsafe_allow_html=True)
     comp_df = pd.DataFrame({
-        "Model":    ["SVM (PASO)", "RF (PASO)", "XGBoost (PASO)", "LightGBM (PASO)",
-                     "RF (Ours)", "XGBoost (Ours)", "LightGBM (Ours)",
-                     "OmicFusionNet", "PASO (best)", "OmicFormer (Ours)"],
-        "PCC":      ["0.8735±0.0021", "0.9006±0.0025", "0.9100±0.0016", "0.9054±0.0026",
-                     "0.9048±0.0016", "0.9288±0.0013", "0.9305±0.0013",
-                     "0.9474±0.0015", "0.9425", "0.9467±0.0013"],
-        "RMSE":     ["1.3632±0.0088", "—", "1.1611±0.0066", "1.1953±0.0079",
-                     "~1.277", "~1.085", "~1.077",
-                     "~0.956", "—", "0.9444±0.0100"],
-        "R²":       ["—", "0.8110±0.0044", "—", "—",
-                     "~0.809", "~0.862", "~0.865",
-                     "~0.895", "—", "0.8956±0.0023"],
-        "Beats PASO": ["—","—","—","—","✓","+1.9%","+2.5%","✓","baseline","✓ +0.42%"],
+        "Model":     ["MOLI [34]", "DeepCDR [32]", "DeepCCDS [43]", "DRPreter [37]",
+                      "PathDSP [42]", "PASO [11]", "OmicFormer (Ours)"],
+        "Features":  ["Mut, CNV, Exp", "Exp, Mut, Methylation", "Exp, Mut",
+                      "Exp, Pathway graph", "Exp, CNV, Mut, Smi",
+                      "Exp, CNV, Mut, Smi", "Exp, CNV, Mut, Smi"],
+        "PCC":       ["0.813", "0.923", "0.930", "0.929",
+                      "0.9282 ± 0.0015", "0.9425 ± 0.0011", "0.9467 ± 0.0013"],
+        "R²":        ["—", "—", "—", "—",
+                      "0.8709 ± 0.0025", "0.8838 ± 0.0021", "0.8956 ± 0.0023"],
+        "RMSE":      ["—", "—", "—", "—",
+                      "1.0499 ± 0.0154", "0.9400 ± 0.0081", "0.9444 ± 0.0100"],
     })
-    st.dataframe(comp_df, hide_index=True, use_container_width=True)
+    st.dataframe(
+        comp_df,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Model": st.column_config.TextColumn("Model"),
+            "Features": st.column_config.TextColumn("Features"),
+            "PCC": st.column_config.TextColumn("PCC"),
+            "R²": st.column_config.TextColumn("R²"),
+            "RMSE": st.column_config.TextColumn("RMSE"),
+        }
+    )
+    st.markdown('<div style="font-size:0.78rem;color:#6B7280;margin-top:0.4rem;font-style:italic">★ PathDSP and PASO use identical GDSC2 protocol — direct comparison. MOLI, DeepCDR, DeepCCDS, DRPreter are contextual comparisons from original publications.</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Per-seed results
@@ -1363,7 +1386,6 @@ elif page == "Model Performance":
                        use_container_width=True, config={"displayModeBar": False})
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Summary stats
         df_pd = D["per_drug"]
         mc1, mc2, mc3, mc4 = st.columns(4)
         for col, val, label in [
