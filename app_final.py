@@ -840,39 +840,29 @@ elif page == "Drug Ranking":
                     st.markdown(f'<div class="narrative" style="margin-top:0.75rem">{narrative}</div>', unsafe_allow_html=True)
                     st.markdown('<div style="font-size:0.7rem;color:#9CA3AF;margin-top:0.3rem">Not a clinical recommendation.</div>', unsafe_allow_html=True)
 
-                    # Layer 3 — Gene Attribution (on demand, session state preserved)
+                    # Layer 3 — Gene Attribution (automatic)
                     st.markdown("<div style='margin-top:0.75rem'></div>", unsafe_allow_html=True)
-                    l3_key = f"l3_result_{rank}"
-                    if st.button("Compute Gene Attribution (Layer 3)", key=f"l3_{rank}"):
-                        st.session_state[l3_key] = True
-
-                    if st.session_state.get(l3_key, False):
-                        try:
-                            model, device = load_model(D["dims"])
-                            gl1, gl2, gl3 = st.columns(3)
-                            with gl1:
-                                st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Mutation Genes</div>', unsafe_allow_html=True)
-                                with st.spinner("Computing..."):
-                                    mg, ms = get_top_genes(rec["idx"], "mut", D, model, device)
-                                if mg:
-                                    st.plotly_chart(gene_bar_chart(mg, ms, COLORS["accent"]),
-                                                    use_container_width=True, config={"displayModeBar": False})
-                            with gl2:
-                                st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">CNV Genes</div>', unsafe_allow_html=True)
-                                with st.spinner("Computing..."):
-                                    cg, cs = get_top_genes(rec["idx"], "cnv", D, model, device)
-                                if cg:
-                                    st.plotly_chart(gene_bar_chart(cg, cs, "#6366F1"),
-                                                    use_container_width=True, config={"displayModeBar": False})
-                            with gl3:
-                                st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Expression Genes</div>', unsafe_allow_html=True)
-                                with st.spinner("Computing..."):
-                                    eg, es = get_top_genes(rec["idx"], "exp", D, model, device)
-                                if eg:
-                                    st.plotly_chart(gene_bar_chart(eg, es, "#F59E0B"),
-                                                    use_container_width=True, config={"displayModeBar": False})
-                        except Exception as e:
-                            st.markdown(f'<div class="warn">Gene attribution error: {str(e)[:80]}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:0.72rem;color:{COLORS["muted"]};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.5rem">Layer 3 — Gene Attribution</div>', unsafe_allow_html=True)
+                    try:
+                        model, device = load_model(D["dims"])
+                        gl1, gl2, gl3 = st.columns(3)
+                        with gl1:
+                            st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Mutation Genes</div>', unsafe_allow_html=True)
+                            mg, ms = get_top_genes(rec["idx"], "mut", D, model, device)
+                            if mg:
+                                st.plotly_chart(gene_bar_chart(mg, ms, COLORS["accent"]), use_container_width=True, config={"displayModeBar": False})
+                        with gl2:
+                            st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">CNV Genes</div>', unsafe_allow_html=True)
+                            cg, cs = get_top_genes(rec["idx"], "cnv", D, model, device)
+                            if cg:
+                                st.plotly_chart(gene_bar_chart(cg, cs, "#6366F1"), use_container_width=True, config={"displayModeBar": False})
+                        with gl3:
+                            st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Expression Genes</div>', unsafe_allow_html=True)
+                            eg, es = get_top_genes(rec["idx"], "exp", D, model, device)
+                            if eg:
+                                st.plotly_chart(gene_bar_chart(eg, es, "#F59E0B"), use_container_width=True, config={"displayModeBar": False})
+                    except Exception as e:
+                        st.markdown(f'<div class="warn">Gene attribution error: {str(e)[:80]}</div>', unsafe_allow_html=True)
 
             st.markdown('</div>', unsafe_allow_html=True)
 
