@@ -850,17 +850,17 @@ elif page == "Drug Ranking":
                             st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Mutation Genes</div>', unsafe_allow_html=True)
                             mg, ms = get_top_genes(rec["idx"], "mut", D, model, device)
                             if mg:
-                                st.plotly_chart(gene_bar_chart(mg, ms, COLORS["accent"]), use_container_width=True, config={"displayModeBar": False})
+                                st.plotly_chart(gene_bar_chart(mg, ms, COLORS["accent"]), use_container_width=True, config={"displayModeBar": False}, key=f"rank_mut_{rank}")
                         with gl2:
                             st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">CNV Genes</div>', unsafe_allow_html=True)
                             cg, cs = get_top_genes(rec["idx"], "cnv", D, model, device)
                             if cg:
-                                st.plotly_chart(gene_bar_chart(cg, cs, "#6366F1"), use_container_width=True, config={"displayModeBar": False})
+                                st.plotly_chart(gene_bar_chart(cg, cs, "#6366F1"), use_container_width=True, config={"displayModeBar": False}, key=f"rank_cnv_{rank}")
                         with gl3:
                             st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Expression Genes</div>', unsafe_allow_html=True)
                             eg, es = get_top_genes(rec["idx"], "exp", D, model, device)
                             if eg:
-                                st.plotly_chart(gene_bar_chart(eg, es, "#F59E0B"), use_container_width=True, config={"displayModeBar": False})
+                                st.plotly_chart(gene_bar_chart(eg, es, "#F59E0B"), use_container_width=True, config={"displayModeBar": False}, key=f"rank_exp_{rank}")
                     except Exception as e:
                         st.markdown(f'<div class="warn">Gene attribution error: {str(e)[:80]}</div>', unsafe_allow_html=True)
 
