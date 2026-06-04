@@ -165,29 +165,37 @@ def load_all_data():
         data["per_drug"] = pd.read_csv(f"{BASE_DIR}/per_drug_metrics_{RUN_NAME}.csv")
     except:
         data["per_drug"] = None
-    try:
-        exp_df = pd.read_parquet(f"{BASE_DIR}/exp_profiles_149drugs.parquet").set_index("CellLine_ID")
-        mut_df = pd.read_parquet(f"{BASE_DIR}/mut_profiles_149drugs.parquet").set_index("CellLine_ID")
-        cnv_df = pd.read_parquet(f"{BASE_DIR}/cnv_profiles_149drugs.parquet").set_index("CellLine_ID")
-        data["exp_genes"] = exp_df.columns.tolist()
-        data["mut_genes"] = mut_df.columns.tolist()
-        data["cnv_genes"] = cnv_df.columns.tolist()
-        data["exp_df"] = exp_df
-        data["mut_df"] = mut_df
-        data["cnv_df"] = cnv_df
-    except:
-        data["exp_genes"] = []
-        data["mut_genes"] = []
-        data["cnv_genes"] = []
-        data["exp_df"] = None
-        data["mut_df"] = None
-        data["cnv_df"] = None
-    try:
-        drug_fp_df = pd.read_parquet(f"{BASE_DIR}/drug_fp_149drugs.parquet")
-        data["drug_fp_df"] = drug_fp_df
-    except:
-        data["drug_fp_df"] = None
+    # Do NOT load parquet files at startup — too large for free tier
+    # They are loaded on demand in get_top_genes via load_omic_data()
+    data["exp_genes"] = []
+    data["mut_genes"] = []
+    data["cnv_genes"] = []
+    data["exp_df"]    = None
+    data["mut_df"]    = None
+    data["cnv_df"]    = None
+    data["drug_fp_df"]= None
     return data
+
+
+@st.cache_resource
+def load_omic_data():
+    """Load parquet files once and cache — called only when Layer 3 is needed."""
+    try:
+        exp_df     = pd.read_parquet(f"{BASE_DIR}/exp_profiles_149drugs.parquet").set_index("CellLine_ID")
+        mut_df     = pd.read_parquet(f"{BASE_DIR}/mut_profiles_149drugs.parquet").set_index("CellLine_ID")
+        cnv_df     = pd.read_parquet(f"{BASE_DIR}/cnv_profiles_149drugs.parquet").set_index("CellLine_ID")
+        drug_fp_df = pd.read_parquet(f"{BASE_DIR}/drug_fp_149drugs.parquet")
+        return {
+            "exp_genes": exp_df.columns.tolist(),
+            "mut_genes": mut_df.columns.tolist(),
+            "cnv_genes": cnv_df.columns.tolist(),
+            "exp_df":    exp_df,
+            "mut_df":    mut_df,
+            "cnv_df":    cnv_df,
+            "drug_fp_df": drug_fp_df,
+        }
+    except Exception as e:
+        return None
 
 
 @st.cache_resource
@@ -298,26 +306,29 @@ Write a concise clinical interpretation for an oncologist in exactly 3 sentences
         return f"Error: {type(e).__name__}: {str(e)[:150]}"
 
 
-def get_top_genes(idx, omic, data, model, device, n=10):
-    if data["exp_df"] is None:
+def get_top_genes(idx, omic, omic_data, data, model, device, n=10):
+    """Layer 3 gene attribution using actual drug fingerprint and omic data."""
+    if omic_data is None:
         return [], []
     try:
         cell_id = data["cell_ids_test"][idx]
         if omic == "exp":
-            genes, raw_df = data["exp_genes"], data["exp_df"]
+            genes, raw_df = omic_data["exp_genes"], omic_data["exp_df"]
         elif omic == "mut":
-            genes, raw_df = data["mut_genes"], data["mut_df"]
+            genes, raw_df = omic_data["mut_genes"], omic_data["mut_df"]
         else:
-            genes, raw_df = data["cnv_genes"], data["cnv_df"]
+            genes, raw_df = omic_data["cnv_genes"], omic_data["cnv_df"]
+
         if cell_id not in raw_df.index:
             return [], []
+
         vals = torch.tensor(raw_df.loc[cell_id].values.astype(np.float32)).unsqueeze(0)
         vals.requires_grad_(True)
 
-        # Use actual drug fingerprint for this sample index
-        if data.get("drug_fp_df") is not None and idx < len(data["drug_fp_df"]):
+        # Use actual drug fingerprint for this sample
+        if omic_data["drug_fp_df"] is not None and idx < len(omic_data["drug_fp_df"]):
             drug_vals = torch.tensor(
-                data["drug_fp_df"].iloc[idx].values.astype(np.float32)).unsqueeze(0)
+                omic_data["drug_fp_df"].iloc[idx].values.astype(np.float32)).unsqueeze(0)
         else:
             drug_vals = torch.zeros(1, data["dims"]["drug_dim"])
 
@@ -391,7 +402,7 @@ def pathway_bar_chart(top10_pw_idx, pathway_names, pw_scores):
     return fig
 
 
-def gene_bar_chart(genes, scores, color, chart_key=None):
+def gene_bar_chart(genes, scores, color):
     if not genes:
         return None
     norm = [s / max(scores) * 100 if max(scores) > 0 else 0 for s in scores]
@@ -704,11 +715,12 @@ elif page == "Single Drug Analysis":
             st.markdown('<div class="card"><div class="card-hdr">Layer 3 — Gene Attribution (Gradient × Input)</div>', unsafe_allow_html=True)
             try:
                 model, device = load_model(D["dims"])
+                omic_data = load_omic_data()
                 g1, g2, g3 = st.columns(3)
                 with g1:
                     st.markdown(f'<div style="font-size:0.82rem;font-weight:600;color:{COLORS["primary"]};margin-bottom:0.5rem;text-align:center">Mutation Genes</div>', unsafe_allow_html=True)
                     with st.spinner("Computing..."):
-                        mut_genes, mut_scores = get_top_genes(idx, "mut", D, model, device)
+                        mut_genes, mut_scores = get_top_genes(idx, "mut", omic_data, D, model, device)
                     if mut_genes:
                         st.plotly_chart(gene_bar_chart(mut_genes, mut_scores, COLORS["accent"]),
                                         use_container_width=True, config={"displayModeBar": False})
@@ -717,7 +729,7 @@ elif page == "Single Drug Analysis":
                 with g2:
                     st.markdown(f'<div style="font-size:0.82rem;font-weight:600;color:{COLORS["primary"]};margin-bottom:0.5rem;text-align:center">CNV Genes</div>', unsafe_allow_html=True)
                     with st.spinner("Computing..."):
-                        cnv_genes, cnv_scores = get_top_genes(idx, "cnv", D, model, device)
+                        cnv_genes, cnv_scores = get_top_genes(idx, "cnv", omic_data, D, model, device)
                     if cnv_genes:
                         st.plotly_chart(gene_bar_chart(cnv_genes, cnv_scores, "#6366F1"),
                                         use_container_width=True, config={"displayModeBar": False})
@@ -726,7 +738,7 @@ elif page == "Single Drug Analysis":
                 with g3:
                     st.markdown(f'<div style="font-size:0.82rem;font-weight:600;color:{COLORS["primary"]};margin-bottom:0.5rem;text-align:center">Expression Genes</div>', unsafe_allow_html=True)
                     with st.spinner("Computing..."):
-                        exp_genes, exp_scores = get_top_genes(idx, "exp", D, model, device)
+                        exp_genes, exp_scores = get_top_genes(idx, "exp", omic_data, D, model, device)
                     if exp_genes:
                         st.plotly_chart(gene_bar_chart(exp_genes, exp_scores, "#F59E0B"),
                                         use_container_width=True, config={"displayModeBar": False})
@@ -818,11 +830,6 @@ elif page == "Drug Ranking":
 
         st.markdown('<div class="card"><div class="card-hdr">Ranked Drug List — Click to Expand</div>', unsafe_allow_html=True)
 
-        try:
-            model, device = load_model(D["dims"])
-        except Exception as e:
-            model, device = None, None
-
         for rank, rec in enumerate(ranking_records):
             sens_color = sensitivity_color(rec["sensitivity"])
 
@@ -865,37 +872,39 @@ elif page == "Drug Ranking":
                 st.markdown(f'<div class="narrative" style="margin-top:0.75rem">{narrative}</div>', unsafe_allow_html=True)
                 st.markdown('<div style="font-size:0.7rem;color:#9CA3AF;margin-top:0.3rem">Not a clinical recommendation.</div>', unsafe_allow_html=True)
 
-                # Layer 3 — Gene Attribution using actual model and drug fingerprint
+                # Layer 3 — Gene Attribution
                 st.markdown("<div style='margin-top:0.75rem'></div>", unsafe_allow_html=True)
                 st.markdown(f'<div style="font-size:0.72rem;color:{COLORS["muted"]};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.5rem">Layer 3 — Gene Attribution (Gradient × Input)</div>', unsafe_allow_html=True)
-                if model is not None:
-                    try:
+                try:
+                    model, device = load_model(D["dims"])
+                    omic_data = load_omic_data()
+                    if omic_data is not None:
                         gl1, gl2, gl3 = st.columns(3)
                         with gl1:
                             st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Mutation Genes</div>', unsafe_allow_html=True)
-                            mg, ms = get_top_genes(rec["idx"], "mut", D, model, device)
+                            mg, ms = get_top_genes(rec["idx"], "mut", omic_data, D, model, device)
                             if mg:
                                 st.plotly_chart(gene_bar_chart(mg, ms, COLORS["accent"]),
                                                 use_container_width=True, config={"displayModeBar": False},
                                                 key=f"l3_mut_{rank}")
                         with gl2:
                             st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">CNV Genes</div>', unsafe_allow_html=True)
-                            cg, cs = get_top_genes(rec["idx"], "cnv", D, model, device)
+                            cg, cs = get_top_genes(rec["idx"], "cnv", omic_data, D, model, device)
                             if cg:
                                 st.plotly_chart(gene_bar_chart(cg, cs, "#6366F1"),
                                                 use_container_width=True, config={"displayModeBar": False},
                                                 key=f"l3_cnv_{rank}")
                         with gl3:
                             st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Expression Genes</div>', unsafe_allow_html=True)
-                            eg, es = get_top_genes(rec["idx"], "exp", D, model, device)
+                            eg, es = get_top_genes(rec["idx"], "exp", omic_data, D, model, device)
                             if eg:
                                 st.plotly_chart(gene_bar_chart(eg, es, "#F59E0B"),
                                                 use_container_width=True, config={"displayModeBar": False},
                                                 key=f"l3_exp_{rank}")
-                    except Exception as e:
-                        st.markdown(f'<div class="warn">Gene attribution error: {str(e)[:80]}</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div class="warn">Model not loaded — gene attribution unavailable.</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="warn">Omic data files not available for gene attribution.</div>', unsafe_allow_html=True)
+                except Exception as e:
+                    st.markdown(f'<div class="warn">Gene attribution error: {str(e)[:80]}</div>', unsafe_allow_html=True)
 
         st.markdown('</div>', unsafe_allow_html=True)
 
