@@ -182,6 +182,11 @@ def load_all_data():
         data["exp_df"] = None
         data["mut_df"] = None
         data["cnv_df"] = None
+    try:
+        drug_fp_df = pd.read_parquet(f"{BASE_DIR}/drug_fp_149drugs.parquet")
+        data["drug_fp_df"] = drug_fp_df
+    except:
+        data["drug_fp_df"] = None
     return data
 
 
@@ -232,11 +237,11 @@ def get_similar_cases(idx, drug, data, k=5):
     mask = data["drug_names_train"] == drug
     if mask.sum() < k:
         return []
-    drug_emb   = data["train_emb"][mask]
-    drug_y     = data["y_train"][mask].flatten()
-    drug_cells = data["drug_names_train"][mask]
-    sims       = cosine_similarity(query, drug_emb)[0]
-    top_k      = sims.argsort()[-k:][::-1]
+    drug_emb    = data["train_emb"][mask]
+    drug_y      = data["y_train"][mask].flatten()
+    drug_cells  = data["drug_names_train"][mask]
+    sims        = cosine_similarity(query, drug_emb)[0]
+    top_k       = sims.argsort()[-k:][::-1]
     drug_median = np.median(drug_y)
     results = []
     for i in top_k:
@@ -308,21 +313,30 @@ def get_top_genes(idx, omic, data, model, device, n=10):
             return [], []
         vals = torch.tensor(raw_df.loc[cell_id].values.astype(np.float32)).unsqueeze(0)
         vals.requires_grad_(True)
+
+        # Use actual drug fingerprint for this sample index
+        if data.get("drug_fp_df") is not None and idx < len(data["drug_fp_df"]):
+            drug_vals = torch.tensor(
+                data["drug_fp_df"].iloc[idx].values.astype(np.float32)).unsqueeze(0)
+        else:
+            drug_vals = torch.zeros(1, data["dims"]["drug_dim"])
+
         dummy_mut  = torch.zeros(1, data["dims"]["mut_dim"])
         dummy_cnv  = torch.zeros(1, data["dims"]["cnv_dim"])
         dummy_exp  = torch.zeros(1, data["dims"]["exp_dim"])
-        dummy_drug = torch.zeros(1, data["dims"]["drug_dim"])
         dummy_ctx  = torch.zeros(1, data["dims"]["context_dim"])
         n_pw       = data["dims"]["n_pathways"]
         dummy_mp   = torch.zeros(1, n_pw * 3)
         dummy_cp   = torch.zeros(1, n_pw * 3)
         dummy_ep   = torch.zeros(1, n_pw * 3)
+
         if omic == "exp":
-            inp = (dummy_mut, dummy_cnv, vals, dummy_drug, dummy_ctx, dummy_mp, dummy_cp, dummy_ep)
+            inp = (dummy_mut, dummy_cnv, vals, drug_vals, dummy_ctx, dummy_mp, dummy_cp, dummy_ep)
         elif omic == "mut":
-            inp = (vals, dummy_cnv, dummy_exp, dummy_drug, dummy_ctx, dummy_mp, dummy_cp, dummy_ep)
+            inp = (vals, dummy_cnv, dummy_exp, drug_vals, dummy_ctx, dummy_mp, dummy_cp, dummy_ep)
         else:
-            inp = (dummy_mut, vals, dummy_exp, dummy_drug, dummy_ctx, dummy_mp, dummy_cp, dummy_ep)
+            inp = (dummy_mut, vals, dummy_exp, drug_vals, dummy_ctx, dummy_mp, dummy_cp, dummy_ep)
+
         pred, *_ = model(*inp)
         model.zero_grad()
         pred.sum().backward()
@@ -377,7 +391,7 @@ def pathway_bar_chart(top10_pw_idx, pathway_names, pw_scores):
     return fig
 
 
-def gene_bar_chart(genes, scores, color):
+def gene_bar_chart(genes, scores, color, chart_key=None):
     if not genes:
         return None
     norm = [s / max(scores) * 100 if max(scores) > 0 else 0 for s in scores]
@@ -455,8 +469,8 @@ def per_drug_chart(per_drug_df):
 
 
 def ranking_scatter(records):
-    drugs  = [r["drug"] for r in records]
-    preds  = [r["pred_ic50"] for r in records]
+    drugs = [r["drug"] for r in records]
+    preds = [r["pred_ic50"] for r in records]
     n = len(records)
     bar_colors = []
     for i in range(n):
@@ -793,78 +807,97 @@ elif page == "Drug Ranking":
             ascending = sort_by == "Most Sensitive"
             ranking_records.sort(key=lambda x: x["pred_ic50"], reverse=not ascending)
             ranking_records = ranking_records[:top_n]
+            st.session_state["ranking_records"] = ranking_records
 
-            st.markdown('<div class="card"><div class="card-hdr">Sensitivity Profile Overview</div>', unsafe_allow_html=True)
-            st.plotly_chart(ranking_scatter(ranking_records), use_container_width=True, config={"displayModeBar": False})
-            st.markdown('</div>', unsafe_allow_html=True)
+    ranking_records = st.session_state.get("ranking_records", [])
 
-            st.markdown('<div class="card"><div class="card-hdr">Ranked Drug List — Click to Expand</div>', unsafe_allow_html=True)
+    if ranking_records:
+        st.markdown('<div class="card"><div class="card-hdr">Sensitivity Profile Overview</div>', unsafe_allow_html=True)
+        st.plotly_chart(ranking_scatter(ranking_records), use_container_width=True, config={"displayModeBar": False})
+        st.markdown('</div>', unsafe_allow_html=True)
 
-            for rank, rec in enumerate(ranking_records):
-                sens_color = sensitivity_color(rec["sensitivity"])
+        st.markdown('<div class="card"><div class="card-hdr">Ranked Drug List — Click to Expand</div>', unsafe_allow_html=True)
 
-                with st.expander(
-                    f"#{rank+1}  {rec['drug']}  —  IC50: {rec['pred_ic50']:.3f}  |  {rec['sensitivity']}",
-                    expanded=False):
+        try:
+            model, device = load_model(D["dims"])
+        except Exception as e:
+            model, device = None, None
 
-                    ec1, ec2, ec3 = st.columns([1, 1, 1.2])
-                    omic_w    = rec["omic_weights"]
-                    top10_pw  = rec["top10_pathways"]
-                    pw_scores = D["pw_importance"][rec["idx"]]
-                    mechanism = D["mechanisms"].get(rec["drug"], "")
+        for rank, rec in enumerate(ranking_records):
+            sens_color = sensitivity_color(rec["sensitivity"])
 
-                    with ec1:
-                        st.markdown(f"""<div style="background:{COLORS['bg']};border-radius:12px;padding:1rem">
-                            <div style="font-size:0.72rem;color:{COLORS['muted']};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.5rem">Prediction</div>
-                            <div style="font-family:'Syne',sans-serif;font-size:2rem;font-weight:700;color:{COLORS['primary']}">{rec['pred_ic50']:.3f}</div>
-                            <div class="sensitivity-badge" style="background:{sens_color}22;color:{sens_color};border:1px solid {sens_color}44;margin-top:0.3rem">{rec['sensitivity']}</div>
-                            <div style="margin-top:0.75rem;font-size:0.8rem;color:{COLORS['muted']}">Observed: {rec['true_ic50']:.3f}</div>
-                            <div class="mech" style="margin-top:0.75rem;font-size:0.78rem">{mechanism[:120]}...</div>
-                        </div>""", unsafe_allow_html=True)
+            with st.expander(
+                f"#{rank+1}  {rec['drug']}  —  IC50: {rec['pred_ic50']:.3f}  |  {rec['sensitivity']}",
+                expanded=False):
 
-                    with ec2:
-                        st.markdown(f'<div style="font-size:0.72rem;color:{COLORS["muted"]};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.3rem">Omic Driver</div>', unsafe_allow_html=True)
-                        st.plotly_chart(omic_bar_chart(omic_w), use_container_width=True, config={"displayModeBar": False})
+                ec1, ec2, ec3 = st.columns([1, 1, 1.2])
+                omic_w    = rec["omic_weights"]
+                top10_pw  = rec["top10_pathways"]
+                pw_scores = D["pw_importance"][rec["idx"]]
+                mechanism = D["mechanisms"].get(rec["drug"], "")
 
-                    with ec3:
-                        st.markdown(f'<div style="font-size:0.72rem;color:{COLORS["muted"]};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.3rem">Top Pathways</div>', unsafe_allow_html=True)
-                        st.plotly_chart(pathway_bar_chart(top10_pw[:6], D["pathway_names"], pw_scores),
-                                        use_container_width=True, config={"displayModeBar": False})
+                with ec1:
+                    st.markdown(f"""<div style="background:{COLORS['bg']};border-radius:12px;padding:1rem">
+                        <div style="font-size:0.72rem;color:{COLORS['muted']};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.5rem">Prediction</div>
+                        <div style="font-family:'Syne',sans-serif;font-size:2rem;font-weight:700;color:{COLORS['primary']}">{rec['pred_ic50']:.3f}</div>
+                        <div class="sensitivity-badge" style="background:{sens_color}22;color:{sens_color};border:1px solid {sens_color}44;margin-top:0.3rem">{rec['sensitivity']}</div>
+                        <div style="margin-top:0.75rem;font-size:0.8rem;color:{COLORS['muted']}">Observed: {rec['true_ic50']:.3f}</div>
+                        <div class="mech" style="margin-top:0.75rem;font-size:0.78rem">{mechanism[:120]}...</div>
+                    </div>""", unsafe_allow_html=True)
 
-                    pw_names = [D["pathway_names"][i] if i < len(D["pathway_names"]) else f"Pathway {i}" for i in top10_pw]
-                    similar  = get_similar_cases(rec["idx"], rec["drug"], D, k=3)
-                    with st.spinner("Generating narrative..."):
-                        narrative = generate_narrative(rec["drug"], mechanism,
-                            rec["pred_ic50"], rec["sensitivity"],
-                            omic_w, pw_names, [], [], similar)
-                    st.markdown(f'<div class="narrative" style="margin-top:0.75rem">{narrative}</div>', unsafe_allow_html=True)
-                    st.markdown('<div style="font-size:0.7rem;color:#9CA3AF;margin-top:0.3rem">Not a clinical recommendation.</div>', unsafe_allow_html=True)
+                with ec2:
+                    st.markdown(f'<div style="font-size:0.72rem;color:{COLORS["muted"]};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.3rem">Omic Driver</div>', unsafe_allow_html=True)
+                    st.plotly_chart(omic_bar_chart(omic_w), use_container_width=True,
+                                   config={"displayModeBar": False}, key=f"omic_{rank}")
 
-                    # Layer 3 — Gene Attribution (automatic)
-                    st.markdown("<div style='margin-top:0.75rem'></div>", unsafe_allow_html=True)
-                    st.markdown(f'<div style="font-size:0.72rem;color:{COLORS["muted"]};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.5rem">Layer 3 — Gene Attribution</div>', unsafe_allow_html=True)
+                with ec3:
+                    st.markdown(f'<div style="font-size:0.72rem;color:{COLORS["muted"]};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.3rem">Top Pathways</div>', unsafe_allow_html=True)
+                    st.plotly_chart(pathway_bar_chart(top10_pw[:6], D["pathway_names"], pw_scores),
+                                    use_container_width=True,
+                                    config={"displayModeBar": False}, key=f"pw_{rank}")
+
+                pw_names = [D["pathway_names"][i] if i < len(D["pathway_names"]) else f"Pathway {i}" for i in top10_pw]
+                similar  = get_similar_cases(rec["idx"], rec["drug"], D, k=3)
+                with st.spinner("Generating narrative..."):
+                    narrative = generate_narrative(rec["drug"], mechanism,
+                        rec["pred_ic50"], rec["sensitivity"],
+                        omic_w, pw_names, [], [], similar)
+                st.markdown(f'<div class="narrative" style="margin-top:0.75rem">{narrative}</div>', unsafe_allow_html=True)
+                st.markdown('<div style="font-size:0.7rem;color:#9CA3AF;margin-top:0.3rem">Not a clinical recommendation.</div>', unsafe_allow_html=True)
+
+                # Layer 3 — Gene Attribution using actual model and drug fingerprint
+                st.markdown("<div style='margin-top:0.75rem'></div>", unsafe_allow_html=True)
+                st.markdown(f'<div style="font-size:0.72rem;color:{COLORS["muted"]};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.5rem">Layer 3 — Gene Attribution (Gradient × Input)</div>', unsafe_allow_html=True)
+                if model is not None:
                     try:
-                        model, device = load_model(D["dims"])
                         gl1, gl2, gl3 = st.columns(3)
                         with gl1:
                             st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Mutation Genes</div>', unsafe_allow_html=True)
                             mg, ms = get_top_genes(rec["idx"], "mut", D, model, device)
                             if mg:
-                                st.plotly_chart(gene_bar_chart(mg, ms, COLORS["accent"]), use_container_width=True, config={"displayModeBar": False}, key=f"rank_mut_{rank}")
+                                st.plotly_chart(gene_bar_chart(mg, ms, COLORS["accent"]),
+                                                use_container_width=True, config={"displayModeBar": False},
+                                                key=f"l3_mut_{rank}")
                         with gl2:
                             st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">CNV Genes</div>', unsafe_allow_html=True)
                             cg, cs = get_top_genes(rec["idx"], "cnv", D, model, device)
                             if cg:
-                                st.plotly_chart(gene_bar_chart(cg, cs, "#6366F1"), use_container_width=True, config={"displayModeBar": False}, key=f"rank_cnv_{rank}")
+                                st.plotly_chart(gene_bar_chart(cg, cs, "#6366F1"),
+                                                use_container_width=True, config={"displayModeBar": False},
+                                                key=f"l3_cnv_{rank}")
                         with gl3:
                             st.markdown(f'<div style="font-size:0.78rem;font-weight:600;color:{COLORS["primary"]};text-align:center;margin-bottom:0.3rem">Expression Genes</div>', unsafe_allow_html=True)
                             eg, es = get_top_genes(rec["idx"], "exp", D, model, device)
                             if eg:
-                                st.plotly_chart(gene_bar_chart(eg, es, "#F59E0B"), use_container_width=True, config={"displayModeBar": False}, key=f"rank_exp_{rank}")
+                                st.plotly_chart(gene_bar_chart(eg, es, "#F59E0B"),
+                                                use_container_width=True, config={"displayModeBar": False},
+                                                key=f"l3_exp_{rank}")
                     except Exception as e:
                         st.markdown(f'<div class="warn">Gene attribution error: {str(e)[:80]}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="warn">Model not loaded — gene attribution unavailable.</div>', unsafe_allow_html=True)
 
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════
