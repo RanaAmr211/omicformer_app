@@ -565,7 +565,7 @@ Write a concise clinical interpretation for an oncologist in exactly 3 sentences
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                      "Content-Type": "application/json"},
-            json={"model": "llama-3.1-8b-instant",
+            json={"model": "llama-3.3-70b-specdec",
                   "messages": [{"role": "user", "content": prompt}],
                   "max_tokens": 200, "temperature": 0.3},
             timeout=30)
